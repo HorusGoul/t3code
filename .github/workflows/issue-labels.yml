@@ -37,6 +37,11 @@ jobs:
                 color: "fbca04",
                 description: "Issue needs maintainer review and initial categorization.",
               },
+              {
+                name: "android:apk-preview",
+                color: "0e8a16",
+                description: "Build and publish a self-contained Android preview APK for this PR.",
+              },
             ];
 
             for (const label of managedLabels) {

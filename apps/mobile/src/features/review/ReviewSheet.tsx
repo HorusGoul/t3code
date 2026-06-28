@@ -21,6 +21,7 @@ import { useEnvironmentPresentation } from "../../state/presentation";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
+import { nativeToolbarIcon } from "../../lib/nativeToolbarIcons";
 import { useThreadDraftForThread } from "../../state/use-thread-composer-state";
 import { EnvironmentConnectionNotice } from "../connection/EnvironmentConnectionNotice";
 import { useReviewCacheForThread } from "./reviewState";
@@ -340,11 +341,16 @@ export function ReviewSheet() {
 
       {showSectionToolbar ? (
         <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Menu icon="ellipsis.circle" title="Select diff" separateBackground>
+          <Stack.Toolbar.Menu
+            icon={nativeToolbarIcon("ellipsis.circle", "moreVertical")}
+            title="Select diff"
+            separateBackground
+          >
             {reviewSections.map((section) => (
               <Stack.Toolbar.MenuAction
                 key={section.id}
                 icon={section.id === selectedSection?.id ? "checkmark" : "circle"}
+                isOn={section.id === selectedSection?.id}
                 onPress={() => selectSection(section.id)}
                 subtitle={section.subtitle ?? undefined}
               >

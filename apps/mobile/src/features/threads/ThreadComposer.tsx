@@ -19,6 +19,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject
 import {
   ActivityIndicator,
   Image,
+  Platform,
   Pressable,
   useColorScheme,
   View,
@@ -64,7 +65,7 @@ import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerComm
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
  * Exported so the parent can compute feed overlap / content insets.
  */
-export const COMPOSER_COLLAPSED_CHROME = 60;
+export const COMPOSER_COLLAPSED_CHROME = Platform.OS === "android" ? 120 : 60;
 
 /**
  * Height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
@@ -76,6 +77,7 @@ export interface ThreadComposerProps {
   readonly draftMessage: string;
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly placeholder: string;
+  readonly contentMaxWidth?: number;
   readonly bottomInset?: number;
   readonly connectionState: RemoteClientConnectionState;
   readonly connectionError: string | null;
@@ -208,12 +210,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const inputRef = props.editorRef ?? fallbackInputRef;
   const [isFocused, setIsFocused] = useState(false);
   const wasExpandedBeforePreviewRef = useRef(false);
+  const sendInFlightRef = useRef(false);
   const { onExpandedChange } = props;
 
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
-  const isExpanded = isFocused;
+  const isExpanded = isFocused || (Platform.OS === "android" && hasContent);
   const canSend = hasContent;
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    onExpandedChange?.(isExpanded);
+  }, [isExpanded, onExpandedChange]);
 
   const onPressImage = useCallback(
     (uri: string) => {
@@ -232,12 +240,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   const handleFocus = useCallback(() => {
     setIsFocused(true);
-    onExpandedChange?.(true);
+    if (Platform.OS !== "android") {
+      onExpandedChange?.(true);
+    }
   }, [onExpandedChange]);
 
   const handleBlur = useCallback(() => {
     setIsFocused(false);
-    onExpandedChange?.(false);
+    if (Platform.OS !== "android") {
+      onExpandedChange?.(false);
+    }
   }, [onExpandedChange]);
   const showStopAction =
     props.selectedThread.session?.status === "running" ||
@@ -447,9 +459,15 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   // ── Handle command selection ──────────────────────────────
   const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props;
 
-  const handleSend = useCallback(() => {
-    void onSendMessage();
-  }, [onSendMessage]);
+  const handleSend = useCallback(async () => {
+    if (!canSend || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
+    try {
+      await onSendMessage();
+    } finally {
+      sendInFlightRef.current = false;
+    }
+  }, [canSend, onSendMessage]);
   const handleCommandSelect = useCallback(
     (item: ComposerCommandItem) => {
       if (!composerTrigger) return;
@@ -629,7 +647,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           : "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 40%, rgba(255,255,255,0.95) 100%)",
       }}
     >
-      <View className="w-full" style={{ position: "relative" }}>
+      <View
+        className="w-full"
+        style={{ alignSelf: "center", maxWidth: props.contentMaxWidth, position: "relative" }}
+      >
         {composerTrigger && composerMenuItems.length > 0 ? (
           <View
             style={{
@@ -702,6 +723,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               placeholder={props.placeholder}
               onFocus={handleFocus}
               onBlur={handleBlur}
+              onSubmit={handleSend}
               scrollEnabled={isExpanded}
               contentInsetVertical={isExpanded ? 0 : 6}
               style={
@@ -771,14 +793,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           ) : null}
         </ComposerSurface>
 
-        {/* Toolbar row — matches draft page layout (expanded only) */}
-        {isExpanded ? (
+        {isExpanded || Platform.OS === "android" ? (
           <ComposerToolbarRow paddingBottom={8} paddingHorizontal={0} paddingTop={8}>
             <ComposerToolbarScroller
               fadeOpaque={toolbarFadeOpaque}
               fadeTransparent={toolbarFadeTransparent}
             >
               <ComposerToolbarButton
+                accessibilityLabel="Add attachment"
                 icon="plus"
                 onPress={() => void props.onPickDraftImages()}
                 showChevron={false}
@@ -805,8 +827,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                   label={configurationLabel}
                 />
               </ControlPillMenu>
-              {showStopAction ? (
+              {isExpanded && showStopAction ? (
                 <ComposerToolbarButton
+                  accessibilityLabel="Stop"
                   icon="stop.fill"
                   variant="danger"
                   onPress={props.onStopThread}
@@ -814,14 +837,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 />
               ) : null}
             </ComposerToolbarScroller>
-            <ComposerToolbarButton
-              accessibilityLabel={sendLabel}
-              icon="arrow.up"
-              variant="primary"
-              disabled={!canSend}
-              onPress={handleSend}
-              showChevron={false}
-            />
+            {isExpanded ? (
+              <ComposerToolbarButton
+                accessibilityLabel={sendLabel}
+                icon="arrow.up"
+                variant="primary"
+                disabled={!canSend}
+                onPress={handleSend}
+                showChevron={false}
+              />
+            ) : null}
           </ComposerToolbarRow>
         ) : null}
 

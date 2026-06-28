@@ -68,6 +68,8 @@ export interface ThreadDetailScreenProps {
   readonly threadCwd: string | null;
   readonly selectedThreadQueueCount: number;
   readonly serverConfig: T3ServerConfig | null;
+  readonly contentTopInset?: number;
+  readonly usesAutomaticContentInsets?: boolean;
   readonly layoutVariant?: LayoutVariant;
   readonly onOpenDrawer: () => void;
   readonly onOpenConnectionEditor: () => void;
@@ -208,6 +210,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
 
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
+  const contentTopInset = props.contentTopInset ?? headerHeight;
   const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`;
   const selectedThreadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
   const composerEditorRef = useRef<ComposerEditorHandle>(null);
@@ -382,7 +385,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               freeze={freeze}
               anchorMessageId={anchorMessageId}
               contentInsetEndAdjustment={contentInsetEndAdjustment}
-              contentTopInset={headerHeight}
+              contentTopInset={contentTopInset}
               contentBottomInset={estimatedOverlayHeight}
               layoutVariant={layoutVariant}
               skills={selectedProviderSkills}

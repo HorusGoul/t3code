@@ -55,6 +55,15 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 
+const WIDGETS = [
+  {
+    name: "AgentActivity",
+    displayName: "Agent Activity",
+    description: "Shows the current state of active T3 Code agents.",
+    supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
+  },
+];
+
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "t3-code",
@@ -145,16 +154,10 @@ const config: ExpoConfig = {
         bundleIdentifier: `${variant.iosBundleIdentifier}.widgets`,
         groupIdentifier: `group.${variant.iosBundleIdentifier}`,
         enablePushNotifications: true,
-        widgets: [
-          {
-            name: "AgentActivity",
-            displayName: "Agent Activity",
-            description: "Shows the current state of active T3 Code agents.",
-            supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
-          },
-        ],
+        widgets: WIDGETS,
       },
     ],
+    ["./plugins/withAndroidWidgetStringResources.cjs", { widgets: WIDGETS }],
     "./plugins/withAndroidCleartextTraffic.cjs",
   ],
   extra: {

@@ -1,4 +1,3 @@
-import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type ColorValue,
@@ -8,8 +7,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import * as Arr from "effect/Array";
-import * as Order from "effect/Order";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
@@ -21,24 +18,14 @@ import Animated, {
 import { useThemeColor } from "../../lib/useThemeColor";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { StatusPill } from "../../components/StatusPill";
 import { useProjects, useThreadShells } from "../../state/entities";
-import { groupProjectsByRepository } from "../../lib/repositoryGroups";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { relativeTime } from "../../lib/time";
 import { threadStatusTone } from "./threadPresentation";
-import { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-
-const threadActivityOrder = Order.mapInput(
-  Order.Struct({
-    activityAt: Order.flip(Order.Number),
-    title: Order.String,
-  }),
-  (thread: EnvironmentThreadShell) => ({
-    activityAt: new Date(thread.updatedAt ?? thread.createdAt).getTime(),
-    title: thread.title,
-  }),
-);
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { buildThreadNavigationGroups } from "./thread-navigation-groups";
 
 export function ThreadNavigationDrawer(props: {
   readonly visible: boolean;
@@ -144,14 +131,13 @@ export function ThreadNavigationDrawer(props: {
                 bottom: 0,
                 width: drawerWidth,
                 backgroundColor: drawerBg,
-                paddingTop: insets.top + 10,
-                paddingBottom: Math.max(insets.bottom, 18),
+                paddingTop: insets.top,
                 boxShadow: `20px 0 36px ${String(drawerShadow)}`,
               },
               drawerStyle,
             ]}
           >
-            <View className="flex-row items-center justify-between px-4 pb-5">
+            <View className="min-h-14 flex-row items-center justify-between px-4 py-2">
               <Text className="text-2xl font-t3-bold">Threads</Text>
               <Pressable
                 onPress={() => {
@@ -192,24 +178,9 @@ function ThreadNavigationDrawerContent(props: {
 }) {
   const projects = useProjects();
   const threads = useThreadShells();
-  const repositoryGroups = useMemo(
-    () => groupProjectsByRepository({ projects, threads }),
-    [projects, threads],
-  );
   const groupedThreads = useMemo(
-    () =>
-      repositoryGroups.map((group) => {
-        const threads: EnvironmentThreadShell[] = [];
-        for (const projectGroup of group.projects) {
-          threads.push(...projectGroup.threads);
-        }
-        return {
-          key: group.key,
-          title: group.projects[0]?.project.title ?? group.title,
-          threads: Arr.sort(threads, threadActivityOrder),
-        };
-      }),
-    [repositoryGroups],
+    () => buildThreadNavigationGroups({ projects, threads }),
+    [projects, threads],
   );
 
   return (

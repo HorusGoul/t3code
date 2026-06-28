@@ -8,10 +8,15 @@ import type {
   SidebarThreadSortOrder,
 } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
-import { useHeaderHeight } from "expo-router/build/react-navigation/elements";
-import { SymbolView } from "expo-symbols";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  ScrollView,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from "react-native-gesture-handler/ReanimatedSwipeable";
@@ -26,6 +31,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useThemeColor } from "../../lib/useThemeColor";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import type { WorkspaceState } from "../../state/workspaceModel";
@@ -38,6 +44,8 @@ import {
   THREAD_SWIPE_SPRING,
   ThreadSwipeActions,
 } from "./thread-swipe-actions";
+import { WorkspaceConnectionStatus } from "./WorkspaceConnectionStatus";
+import { shouldShowWorkspaceConnectionStatus } from "./workspace-connection-status";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -385,65 +393,10 @@ function ThreadRow(props: {
 
 /* ─── Main screen ────────────────────────────────────────────────────── */
 
-function staleCatalogPillLabel(props: { readonly catalogState: WorkspaceState }): string {
-  if (props.catalogState.networkStatus === "offline") {
-    return "You are offline";
-  }
-  const connectingEnvironments = props.catalogState.connectingEnvironments;
-  if (connectingEnvironments.length === 1) {
-    return `Reconnecting to ${connectingEnvironments[0]!.environmentLabel}`;
-  }
-  if (connectingEnvironments.length > 1) {
-    return `Reconnecting ${connectingEnvironments.length} environments`;
-  }
-  return "Not connected";
-}
-
-function StaleCatalogStatusPill(props: {
-  readonly catalogState: WorkspaceState;
-  readonly onPress: () => void;
-}) {
-  const iconColor = useThemeColor("--color-icon-muted");
-  const label = staleCatalogPillLabel(props);
-  const isReconnecting = props.catalogState.connectingEnvironments.length > 0;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={props.onPress}
-      className="flex-row items-center gap-2 rounded-full bg-card px-4 py-2.5"
-      style={{
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.12,
-        shadowRadius: 24,
-      }}
-    >
-      {isReconnecting ? (
-        <ActivityIndicator color={iconColor} size="small" />
-      ) : (
-        <SymbolView
-          name="wifi.slash"
-          size={15}
-          tintColor={iconColor}
-          type="monochrome"
-          weight="semibold"
-        />
-      )}
-      <Text className="max-w-[260px] text-sm font-t3-bold text-foreground" numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 export function HomeScreen(props: HomeScreenProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const insets = useSafeAreaInsets();
-  const headerHeight = useHeaderHeight();
-  const contentTopInset = Math.max(headerHeight, insets.top);
-  const contentBottomInset = Math.max(insets.bottom, 12);
   const accentColor = useThemeColor("--color-icon-muted");
 
   const toggleExpanded = useCallback((key: string) => {
@@ -499,10 +452,7 @@ export function HomeScreen(props: HomeScreenProps) {
       : (props.savedConnectionsById[props.selectedEnvironmentId]?.environmentLabel ??
         "this environment");
   const hasSearchQuery = props.searchQuery.trim().length > 0;
-  const shouldShowConnectionStatus =
-    props.catalogState.networkStatus === "offline" ||
-    props.catalogState.hasConnectingEnvironment ||
-    (props.catalogState.hasLoadedShellSnapshot && !props.catalogState.hasReadyEnvironment);
+  const shouldShowConnectionStatus = shouldShowWorkspaceConnectionStatus(props.catalogState);
   const emptyState = deriveEmptyState({
     catalogState: props.catalogState,
     projectCount: props.projects.length,
@@ -511,18 +461,19 @@ export function HomeScreen(props: HomeScreenProps) {
   return (
     <View className="flex-1 bg-screen">
       <ScrollView
-        automaticallyAdjustsScrollIndicatorInsets={false}
-        contentInsetAdjustmentBehavior="never"
-        scrollIndicatorInsets={{ top: contentTopInset, bottom: contentBottomInset }}
+        contentInsetAdjustmentBehavior={Platform.OS === "ios" ? "automatic" : "never"}
         showsVerticalScrollIndicator={false}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={() => openSwipeableRef.current?.close()}
         className="flex-1"
         contentContainerStyle={{
+          alignSelf: "center",
+          width: "100%",
+          maxWidth: 720,
           paddingHorizontal: 16,
-          paddingTop: contentTopInset + 8,
-          paddingBottom: contentBottomInset + 24,
+          paddingTop: Platform.OS === "android" ? 16 : 8,
+          paddingBottom: Math.max(insets.bottom, 24),
           gap: 20,
         }}
       >
@@ -615,8 +566,8 @@ export function HomeScreen(props: HomeScreenProps) {
           className="absolute left-0 right-0 items-center"
           style={{ bottom: Math.max(insets.bottom, 18) + 76 }}
         >
-          <StaleCatalogStatusPill
-            catalogState={props.catalogState}
+          <WorkspaceConnectionStatus
+            state={props.catalogState}
             onPress={props.onOpenEnvironments}
           />
         </View>

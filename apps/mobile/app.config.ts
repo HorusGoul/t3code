@@ -8,6 +8,15 @@ const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
+const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+
+const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
+
+if (isIosPersonalTeamBuild && !personalTeamBundleIdentifier) {
+  throw new Error(
+    "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID is required when T3CODE_IOS_PERSONAL_TEAM=1.",
+  );
+}
 
 const VARIANT_CONFIG: Record<
   AppVariant,
@@ -54,15 +63,27 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
+const iosBundleIdentifier =
+  isIosPersonalTeamBuild && personalTeamBundleIdentifier
+    ? personalTeamBundleIdentifier
+    : variant.iosBundleIdentifier;
 
-const WIDGETS = [
+const widgetsPlugin = [
+  "expo-widgets",
   {
-    name: "AgentActivity",
-    displayName: "Agent Activity",
-    description: "Shows the current state of active T3 Code agents.",
-    supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
+    bundleIdentifier: `${iosBundleIdentifier}.widgets`,
+    groupIdentifier: `group.${iosBundleIdentifier}`,
+    enablePushNotifications: true,
+    widgets: [
+      {
+        name: "AgentActivity",
+        displayName: "Agent Activity",
+        description: "Shows the current state of active T3 Code agents.",
+        supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
+      },
+    ],
   },
-];
+] satisfies NonNullable<ExpoConfig["plugins"]>[number];
 
 const config: ExpoConfig = {
   name: variant.appName,
@@ -85,7 +106,7 @@ const config: ExpoConfig = {
   ios: {
     icon: variant.iosIcon,
     supportsTablet: true,
-    bundleIdentifier: variant.iosBundleIdentifier,
+    bundleIdentifier: iosBundleIdentifier,
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
@@ -111,9 +132,10 @@ const config: ExpoConfig = {
   },
   plugins: [
     "expo-router",
+    "expo-asset",
     "expo-font",
     "expo-secure-store",
-    ["@clerk/expo", { theme: "./clerk-theme.json" }],
+    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",
     [
       "expo-camera",
@@ -148,17 +170,11 @@ const config: ExpoConfig = {
         },
       },
     ],
-    [
-      "expo-widgets",
-      {
-        bundleIdentifier: `${variant.iosBundleIdentifier}.widgets`,
-        groupIdentifier: `group.${variant.iosBundleIdentifier}`,
-        enablePushNotifications: true,
-        widgets: WIDGETS,
-      },
-    ],
-    ["./plugins/withAndroidWidgetStringResources.cjs", { widgets: WIDGETS }],
+    "./plugins/withIosCocoaPodsUuidCache.cjs",
+    ...(!isIosPersonalTeamBuild ? [widgetsPlugin] : []),
+    "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
+    ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {
     appVariant: APP_VARIANT,

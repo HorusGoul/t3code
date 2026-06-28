@@ -8,6 +8,7 @@ import type {
   SidebarThreadSortOrder,
 } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
+import { useHeaderHeight } from "expo-router/build/react-navigation/elements";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
@@ -440,6 +441,9 @@ export function HomeScreen(props: HomeScreenProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set());
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
+  const contentTopInset = Math.max(headerHeight, insets.top);
+  const contentBottomInset = Math.max(insets.bottom, 12);
   const accentColor = useThemeColor("--color-icon-muted");
 
   const toggleExpanded = useCallback((key: string) => {
@@ -507,7 +511,9 @@ export function HomeScreen(props: HomeScreenProps) {
   return (
     <View className="flex-1 bg-screen">
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
+        automaticallyAdjustsScrollIndicatorInsets={false}
+        contentInsetAdjustmentBehavior="never"
+        scrollIndicatorInsets={{ top: contentTopInset, bottom: contentBottomInset }}
         showsVerticalScrollIndicator={false}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
@@ -515,8 +521,8 @@ export function HomeScreen(props: HomeScreenProps) {
         className="flex-1"
         contentContainerStyle={{
           paddingHorizontal: 16,
-          paddingTop: 8,
-          paddingBottom: 24,
+          paddingTop: contentTopInset + 8,
+          paddingBottom: contentBottomInset + 24,
           gap: 20,
         }}
       >

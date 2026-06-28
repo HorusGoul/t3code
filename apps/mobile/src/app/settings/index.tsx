@@ -35,6 +35,14 @@ import { useSavedRemoteConnections } from "../../state/use-remote-environment-re
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
 
+function activityUpdatesLabel(): string {
+  return Platform.OS === "android" ? "Agent Activity Updates" : "Live Activity Updates";
+}
+
+function activityUpdatesDescription(): string {
+  return Platform.OS === "android" ? "Agent Activity" : "Live Activity";
+}
+
 export default function SettingsRouteScreen() {
   const router = useRouter();
   const { layout } = useAdaptiveWorkspaceLayout();
@@ -112,7 +120,7 @@ function ConfiguredSettingsRouteScreen() {
   }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
 
   const refreshNotifications = useCallback(async () => {
-    if (process.env.EXPO_OS !== "ios") {
+    if (Platform.OS !== "ios" && Platform.OS !== "android") {
       setNotificationStatus("unsupported");
       return;
     }
@@ -173,7 +181,7 @@ function ConfiguredSettingsRouteScreen() {
       setNotificationStatus("enabled");
       Alert.alert(
         "Notifications enabled",
-        "Live Activity notifications are enabled for this device.",
+        `${activityUpdatesDescription()} notifications are enabled for this device.`,
       );
       return;
     }
@@ -181,7 +189,7 @@ function ConfiguredSettingsRouteScreen() {
       setNotificationStatus("unsupported");
       Alert.alert(
         "Notifications unavailable",
-        "Live Activity notifications are only available on iOS.",
+        "Agent Activity notifications are only available on iOS and Android.",
       );
       return;
     }
@@ -203,7 +211,7 @@ function ConfiguredSettingsRouteScreen() {
   const promptSignIn = useCallback(() => {
     Alert.alert(
       "Request T3 Cloud access",
-      "Live Activity updates require approved T3 Cloud access so relay can deliver updates to this device.",
+      `${activityUpdatesDescription()} updates require approved T3 Cloud access so relay can deliver updates to this device.`,
       [
         { text: "Cancel", style: "cancel" },
         { text: "Continue", onPress: () => push("/settings/waitlist") },
@@ -223,8 +231,10 @@ function ConfiguredSettingsRouteScreen() {
       setLiveActivityStatus("disabled");
       const error = squashAtomCommandFailure(tokenResult);
       Alert.alert(
-        "Live Activities unavailable",
-        error instanceof Error ? error.message : "Could not enable Live Activity updates.",
+        `${activityUpdatesDescription()} updates unavailable`,
+        error instanceof Error
+          ? error.message
+          : `Could not enable ${activityUpdatesLabel().toLowerCase()}.`,
       );
       return;
     }
@@ -248,8 +258,10 @@ function ConfiguredSettingsRouteScreen() {
       if (!isAtomCommandInterrupted(updateResult)) {
         const error = squashAtomCommandFailure(updateResult);
         Alert.alert(
-          "Live Activities unavailable",
-          error instanceof Error ? error.message : "Could not enable Live Activity updates.",
+          `${activityUpdatesDescription()} updates unavailable`,
+          error instanceof Error
+            ? error.message
+            : `Could not enable ${activityUpdatesLabel().toLowerCase()}.`,
         );
       }
       return;
@@ -258,10 +270,10 @@ function ConfiguredSettingsRouteScreen() {
     refreshManagedRelayEnvironments();
     setLiveActivityStatus("enabled");
     Alert.alert(
-      "Live Activities enabled",
+      `${activityUpdatesDescription()} updates enabled`,
       environmentCount > 0
-        ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for Live Activity updates.`
-        : "Live Activity updates are enabled. Add an environment to start receiving updates.",
+        ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for ${activityUpdatesLabel().toLowerCase()}.`
+        : `${activityUpdatesDescription()} updates are enabled. Add an environment to start receiving updates.`,
     );
   }, [connections, environmentCount, getToken, isSignedIn, promptSignIn]);
 
@@ -274,7 +286,7 @@ function ConfiguredSettingsRouteScreen() {
 
       Alert.alert(
         "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for T3 Code.",
+        "Notification permission is controlled by the system. Open Settings to disable notifications for T3 Code.",
         [
           { text: "Cancel", style: "cancel" },
           { text: "Open Settings", onPress: () => void Linking.openSettings() },
@@ -390,7 +402,7 @@ function ConfiguredSettingsRouteScreen() {
               !isLoaded || liveActivityStatus === "checking" || liveActivityStatus === "linking"
             }
             icon="bolt.circle"
-            label="Live Activity Updates"
+            label={activityUpdatesLabel()}
             value={liveActivityStatus === "enabled" || liveActivityStatus === "linking"}
             onValueChange={handleLiveActivitiesChange}
           />

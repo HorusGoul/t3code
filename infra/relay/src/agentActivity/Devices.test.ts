@@ -9,14 +9,23 @@ import * as RelayDb from "../db.ts";
 import { relayLiveActivities, relayMobileDevices } from "../persistence/schema.ts";
 import * as Devices from "./Devices.ts";
 
-const registration: RelayDeviceRegistrationRequest = {
-  deviceId: "device-1" as RelayDeviceRegistrationRequest["deviceId"],
+type IosDeviceRegistrationRequest = Extract<
+  RelayDeviceRegistrationRequest,
+  { readonly platform: "ios" }
+>;
+type AndroidDeviceRegistrationRequest = Extract<
+  RelayDeviceRegistrationRequest,
+  { readonly platform: "android" }
+>;
+
+const registration: IosDeviceRegistrationRequest = {
+  deviceId: "device-1" as IosDeviceRegistrationRequest["deviceId"],
   label: "Julius's iPhone",
   platform: "ios",
   iosMajorVersion: 18,
-  appVersion: "1.0.0" as RelayDeviceRegistrationRequest["appVersion"],
-  pushToken: "apns-device-token" as RelayDeviceRegistrationRequest["pushToken"],
-  pushToStartToken: "push-to-start-token" as RelayDeviceRegistrationRequest["pushToStartToken"],
+  appVersion: "1.0.0" as IosDeviceRegistrationRequest["appVersion"],
+  pushToken: "apns-device-token" as IosDeviceRegistrationRequest["pushToken"],
+  pushToStartToken: "push-to-start-token" as IosDeviceRegistrationRequest["pushToStartToken"],
   preferences: {
     notificationsEnabled: true,
     liveActivitiesEnabled: true,
@@ -25,6 +34,18 @@ const registration: RelayDeviceRegistrationRequest = {
     notifyOnCompletion: true,
     notifyOnFailure: true,
   },
+};
+
+const androidRegistration: AndroidDeviceRegistrationRequest = {
+  deviceId: "device-2" as AndroidDeviceRegistrationRequest["deviceId"],
+  label: "Julius's Pixel",
+  platform: "android",
+  androidApiLevel: 35,
+  appVersion: "1.0.0" as AndroidDeviceRegistrationRequest["appVersion"],
+  pushToken: "fcm-device-token" as AndroidDeviceRegistrationRequest["pushToken"],
+  notificationChannelId: "agent-activity",
+  alertNotificationChannelId: "agent-activity-alerts",
+  preferences: registration.preferences,
 };
 
 describe("Devices", () => {
@@ -115,6 +136,77 @@ describe("Devices", () => {
     );
   });
 
+  it.effect("registers Android FCM devices without claiming push-to-start tokens", () => {
+    const calls: Array<string> = [];
+    const updateSets: Array<Record<string, unknown>> = [];
+    const insertedValues: Array<Record<string, unknown>> = [];
+
+    const fakeDb = {
+      update: (table: unknown) => {
+        expect(table).toBe(relayMobileDevices);
+        calls.push("update");
+        return {
+          set: (values: Record<string, unknown>) => {
+            updateSets.push(values);
+            calls.push("update.set");
+            return {
+              where: () => {
+                calls.push("update.where");
+                return Effect.void;
+              },
+            };
+          },
+        };
+      },
+      insert: (table: unknown) => {
+        expect(table).toBe(relayMobileDevices);
+        calls.push("insert");
+        return {
+          values: (values: Record<string, unknown>) => {
+            insertedValues.push(values);
+            calls.push("insert.values");
+            return {
+              onConflictDoUpdate: () => {
+                calls.push("insert.onConflictDoUpdate");
+                return Effect.void;
+              },
+            };
+          },
+        };
+      },
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const devices = yield* Devices.Devices;
+      yield* devices.register({ userId: "user-2", registration: androidRegistration });
+
+      expect(calls).toEqual([
+        "update",
+        "update.set",
+        "update.where",
+        "insert",
+        "insert.values",
+        "insert.onConflictDoUpdate",
+      ]);
+      expect(updateSets).toEqual([expect.objectContaining({ pushToken: null })]);
+      expect(insertedValues).toEqual([
+        expect.objectContaining({
+          userId: "user-2",
+          deviceId: "device-2",
+          platform: "android",
+          iosMajorVersion: null,
+          androidApiLevel: 35,
+          pushToken: "fcm-device-token",
+          pushToStartToken: null,
+          notificationChannelId: "agent-activity",
+          alertNotificationChannelId: "agent-activity-alerts",
+        }),
+      ]);
+    }).pipe(
+      Effect.provide(Devices.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb)))),
+    );
+  });
+
   it.effect("unregisters APNs state only for the current user device", () => {
     const calls: Array<string> = [];
     const deleteConditions: Array<SQL> = [];
@@ -179,7 +271,22 @@ describe("Devices", () => {
                   label: "Julius's iPhone",
                   platform: "ios" as const,
                   iosMajorVersion: 18,
+                  androidApiLevel: null,
                   appVersion: "1.0.0",
+                  notificationChannelId: null,
+                  alertNotificationChannelId: null,
+                  preferences: registration.preferences,
+                  updatedAt: "2026-06-01T00:00:00.000Z",
+                },
+                {
+                  deviceId: "device-2",
+                  label: "Julius's Pixel",
+                  platform: "android" as const,
+                  iosMajorVersion: null,
+                  androidApiLevel: 35,
+                  appVersion: "1.0.0",
+                  notificationChannelId: "agent-activity",
+                  alertNotificationChannelId: "agent-activity-alerts",
                   preferences: registration.preferences,
                   updatedAt: "2026-06-01T00:00:00.000Z",
                 },
@@ -206,6 +313,26 @@ describe("Devices", () => {
           platform: "ios",
           iosMajorVersion: 18,
           appVersion: "1.0.0",
+          notifications: {
+            enabled: true,
+            notifyOnApproval: true,
+            notifyOnInput: true,
+            notifyOnCompletion: true,
+            notifyOnFailure: true,
+          },
+          liveActivities: {
+            enabled: true,
+          },
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        },
+        {
+          deviceId: "device-2",
+          label: "Julius's Pixel",
+          platform: "android",
+          androidApiLevel: 35,
+          appVersion: "1.0.0",
+          notificationChannelId: "agent-activity",
+          alertNotificationChannelId: "agent-activity-alerts",
           notifications: {
             enabled: true,
             notifyOnApproval: true,

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 
+import { configureAndroidAgentActivityNotificationHandling } from "./androidNotifications";
 import { routeAgentNotificationResponseOnce } from "./notificationPayload";
 import { consumeLastAgentNotificationResponse } from "./notificationResponseConsumer";
 
@@ -10,6 +11,8 @@ export function useAgentNotificationNavigation(): void {
   const handledResponseIds = useRef(new Set<string>());
 
   useEffect(() => {
+    configureAndroidAgentActivityNotificationHandling();
+
     const handleResponse = (response: Notifications.NotificationResponse): void => {
       routeAgentNotificationResponseOnce({
         handledResponseIds: handledResponseIds.current,

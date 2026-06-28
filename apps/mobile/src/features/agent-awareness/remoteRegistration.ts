@@ -26,6 +26,11 @@ import {
 } from "../../lib/storage";
 import AgentActivity, { type AgentActivityProps } from "../../widgets/AgentActivity";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
+import {
+  androidAgentActivityNotificationChannels,
+  ensureAndroidAgentActivityNotificationChannels,
+  type AndroidAgentActivityNotificationChannels,
+} from "./androidNotifications";
 import { makeRelayDeviceRegistrationRequest } from "./registrationPayload";
 
 const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000;
@@ -33,6 +38,7 @@ const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000;
 const AgentAwarenessOperation = Schema.Literals([
   "read-notification-permissions",
   "read-native-push-token",
+  "configure-android-notification-channel",
   "read-device-registration-relay-token",
   "read-device-unregistration-relay-token",
   "read-live-activity-registration-relay-token",
@@ -102,6 +108,21 @@ function canRegisterRemoteLiveActivities(): boolean {
   return Platform.OS === "ios";
 }
 
+function canRegisterAgentAwarenessDevice(): boolean {
+  return Platform.OS === "ios" || Platform.OS === "android";
+}
+
+function nativePushTokenType(): "ios" | "android" | null {
+  switch (Platform.OS) {
+    case "ios":
+      return "ios";
+    case "android":
+      return "android";
+    default:
+      return null;
+  }
+}
+
 export function shouldRegisterAgentAwarenessDeviceForProvider(
   previousIdentity: string | null,
   identity: string | undefined,
@@ -155,13 +176,56 @@ function iosMajorVersion(): number {
   return Number.isFinite(major) ? major : 18;
 }
 
+function androidApiLevel(): number {
+  const version = Platform.Version;
+  if (typeof version === "number") {
+    return Math.max(1, Math.floor(version));
+  }
+  const apiLevel = Number.parseInt(version.split(".")[0] ?? "", 10);
+  return Number.isFinite(apiLevel) && apiLevel > 0 ? apiLevel : 1;
+}
+
+function deviceRegistrationLabel(): string {
+  const deviceName = Constants.deviceName?.trim();
+  if (deviceName) {
+    return deviceName;
+  }
+  return Platform.OS === "android" ? "Android device" : "iOS device";
+}
+
+function configureAndroidNotificationChannels(): Effect.Effect<
+  AndroidAgentActivityNotificationChannels | null,
+  AgentAwarenessOperationError
+> {
+  return Effect.tryPromise({
+    try: () => ensureAndroidAgentActivityNotificationChannels(),
+    catch: (cause) =>
+      new AgentAwarenessOperationError({
+        operation: "configure-android-notification-channel",
+        cause,
+      }),
+  }).pipe(
+    Effect.tapError((error) =>
+      Effect.sync(() => {
+        logRegistrationError("Android agent activity notification channel setup failed", error);
+      }),
+    ),
+    Effect.orElseSucceed(() => androidAgentActivityNotificationChannels()),
+  );
+}
+
 function nativePushTokenRegistration(observedPushToken?: string) {
   return Effect.gen(function* () {
-    if (!canRegisterRemoteLiveActivities()) {
-      return { notificationsEnabled: false, pushToken: null };
+    const tokenType = nativePushTokenType();
+    if (!tokenType) {
+      return { notificationsEnabled: false, pushToken: null, androidChannels: null };
     }
+
+    const androidChannels =
+      Platform.OS === "android" ? yield* configureAndroidNotificationChannels() : null;
+
     if (observedPushToken) {
-      return { notificationsEnabled: true, pushToken: observedPushToken };
+      return { notificationsEnabled: true, pushToken: observedPushToken, androidChannels };
     }
     const permissions = yield* Effect.tryPromise({
       try: () => Notifications.getPermissionsAsync(),
@@ -172,7 +236,7 @@ function nativePushTokenRegistration(observedPushToken?: string) {
         }),
     });
     if (!permissions.granted) {
-      return { notificationsEnabled: false, pushToken: null };
+      return { notificationsEnabled: false, pushToken: null, androidChannels };
     }
     const token = yield* Effect.tryPromise({
       try: () => Notifications.getDevicePushTokenAsync(),
@@ -184,16 +248,16 @@ function nativePushTokenRegistration(observedPushToken?: string) {
     }).pipe(
       Effect.tapError((error) =>
         Effect.sync(() => {
-          logRegistrationError("native APNs token lookup failed", error);
+          logRegistrationError("native push token lookup failed", error);
         }),
       ),
       Effect.orElseSucceed(() => null),
     );
     const pushToken =
-      token?.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0
+      token?.type === tokenType && typeof token.data === "string" && token.data.trim().length > 0
         ? token.data.trim()
         : null;
-    return { notificationsEnabled: pushToken !== null, pushToken };
+    return { notificationsEnabled: pushToken !== null, pushToken, androidChannels };
   });
 }
 
@@ -415,7 +479,7 @@ function registerDevice(
   expectedGeneration = deviceRegistrationGeneration,
 ): Effect.Effect<void, unknown, ManagedRelay.ManagedRelayClient> {
   return Effect.gen(function* () {
-    if (!canRegisterRemoteLiveActivities()) {
+    if (!canRegisterAgentAwarenessDevice()) {
       logRegistrationDebug("device registration skipped; platform does not support it");
       return;
     }
@@ -444,19 +508,30 @@ function registerDevice(
       expectedGeneration,
       notificationsEnabled: pushTokenRegistration.notificationsEnabled,
     });
-    yield* registerDeviceWithRelay(
-      makeRelayDeviceRegistrationRequest({
-        deviceId,
-        label: Constants.deviceName?.trim() || "iOS device",
-        iosMajorVersion: iosMajorVersion(),
-        appVersion: Constants.expoConfig?.version,
-        ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
-        ...(input?.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
-        notificationsEnabled: pushTokenRegistration.notificationsEnabled,
-        preferences,
-      }),
-      expectedGeneration,
-    );
+    const commonRegistrationInput = {
+      deviceId,
+      label: deviceRegistrationLabel(),
+      appVersion: Constants.expoConfig?.version,
+      ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
+      notificationsEnabled: pushTokenRegistration.notificationsEnabled,
+      preferences,
+    };
+    const registrationRequest =
+      Platform.OS === "android"
+        ? makeRelayDeviceRegistrationRequest({
+            ...commonRegistrationInput,
+            platform: "android",
+            androidApiLevel: androidApiLevel(),
+            ...((pushTokenRegistration.androidChannels ??
+              androidAgentActivityNotificationChannels()) as AndroidAgentActivityNotificationChannels),
+          })
+        : makeRelayDeviceRegistrationRequest({
+            ...commonRegistrationInput,
+            platform: "ios",
+            iosMajorVersion: iosMajorVersion(),
+            ...(input?.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
+          });
+    yield* registerDeviceWithRelay(registrationRequest, expectedGeneration);
   });
 }
 
@@ -484,22 +559,26 @@ function ensurePushToStartListener(): void {
 }
 
 function ensurePushTokenListener(): void {
-  if (pushTokenSubscription || !canRegisterRemoteLiveActivities()) {
+  if (pushTokenSubscription || !canRegisterAgentAwarenessDevice()) {
     return;
   }
 
   pushTokenSubscription = Notifications.addPushTokenListener((token) => {
-    if (token.type === "ios" && typeof token.data === "string" && token.data.trim().length > 0) {
+    if (
+      token.type === nativePushTokenType() &&
+      typeof token.data === "string" &&
+      token.data.trim().length > 0
+    ) {
       enqueueDeviceRegistration(
         { observedPushToken: token.data.trim() },
-        "native APNs token rotation registration failed",
+        "native push token rotation registration failed",
       );
     }
   });
 }
 
 export function registerAgentAwarenessConnection(connection: SavedRemoteConnection): void {
-  if (!canRegisterRemoteLiveActivities()) {
+  if (!canRegisterAgentAwarenessDevice()) {
     return;
   }
 
@@ -507,10 +586,12 @@ export function registerAgentAwarenessConnection(connection: SavedRemoteConnecti
   ensurePushToStartListener();
   ensurePushTokenListener();
   enqueueDeviceRegistration({}, "device registration failed");
-  runRegistrationInBackground(
-    refreshActiveLiveActivityRemoteRegistration(),
-    "active live activity registration after environment connection failed",
-  );
+  if (canRegisterRemoteLiveActivities()) {
+    runRegistrationInBackground(
+      refreshActiveLiveActivityRemoteRegistration(),
+      "active live activity registration after environment connection failed",
+    );
+  }
 }
 
 function removeAgentAwarenessConnection(environmentId: EnvironmentId): void {

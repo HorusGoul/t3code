@@ -135,6 +135,7 @@ const config: ExpoConfig = {
     "expo-asset",
     "expo-font",
     "expo-secure-store",
+    ["expo-notifications", { defaultChannel: "agent-activity" }],
     ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",
     [

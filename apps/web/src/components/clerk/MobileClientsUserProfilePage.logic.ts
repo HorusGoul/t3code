@@ -15,7 +15,19 @@ const NOTIFICATION_PREFERENCES = [
 >;
 
 export function mobileClientPlatformLabel(device: RelayClientDeviceRecord): string {
-  return `iOS ${device.iosMajorVersion}${device.appVersion ? ` · T3 Code ${device.appVersion}` : ""}`;
+  const appVersion = device.appVersion ? ` · T3 Code ${device.appVersion}` : "";
+  switch (device.platform) {
+    case "ios":
+      return `iOS ${device.iosMajorVersion}${appVersion}`;
+    case "android":
+      return device.androidApiLevel
+        ? `Android API ${device.androidApiLevel}${appVersion}`
+        : `Android${appVersion}`;
+  }
+}
+
+export function mobileClientActivityUpdatesLabel(device: RelayClientDeviceRecord): string {
+  return device.platform === "android" ? "Agent Activity" : "Live Activities";
 }
 
 export function mobileClientNotificationDetail(device: RelayClientDeviceRecord): string {

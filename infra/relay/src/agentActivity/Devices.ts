@@ -100,7 +100,7 @@ export const make = Effect.gen(function* () {
                   ),
                 )
             : Effect.void,
-          registration.pushToStartToken
+          registration.platform === "ios" && registration.pushToStartToken
             ? db
                 .update(relayMobileDevices)
                 .set({ pushToStartToken: null, updatedAt })
@@ -128,10 +128,17 @@ export const make = Effect.gen(function* () {
           deviceId: registration.deviceId,
           label: registration.label,
           platform: registration.platform,
-          iosMajorVersion: registration.iosMajorVersion,
+          iosMajorVersion: registration.platform === "ios" ? registration.iosMajorVersion : null,
+          androidApiLevel:
+            registration.platform === "android" ? registration.androidApiLevel : null,
           appVersion: registration.appVersion ?? null,
           pushToken: registration.pushToken ?? null,
-          pushToStartToken: registration.pushToStartToken ?? null,
+          pushToStartToken:
+            registration.platform === "ios" ? (registration.pushToStartToken ?? null) : null,
+          notificationChannelId:
+            registration.platform === "android" ? registration.notificationChannelId : null,
+          alertNotificationChannelId:
+            registration.platform === "android" ? registration.alertNotificationChannelId : null,
           preferencesJson: registration.preferences,
           createdAt: updatedAt,
           updatedAt,
@@ -141,13 +148,19 @@ export const make = Effect.gen(function* () {
           set: {
             platform: registration.platform,
             label: registration.label,
-            iosMajorVersion: registration.iosMajorVersion,
+            iosMajorVersion: registration.platform === "ios" ? registration.iosMajorVersion : null,
+            androidApiLevel:
+              registration.platform === "android" ? registration.androidApiLevel : null,
             appVersion: registration.appVersion ?? null,
             pushToken: sql`coalesce(excluded.push_token, ${relayMobileDevices.pushToken})`,
             pushToStartToken: sql`coalesce(
                 excluded.push_to_start_token,
                 ${relayMobileDevices.pushToStartToken}
               )`,
+            notificationChannelId:
+              registration.platform === "android" ? registration.notificationChannelId : null,
+            alertNotificationChannelId:
+              registration.platform === "android" ? registration.alertNotificationChannelId : null,
             preferencesJson: registration.preferences,
             updatedAt,
           },
@@ -219,7 +232,10 @@ export const make = Effect.gen(function* () {
           label: relayMobileDevices.label,
           platform: relayMobileDevices.platform,
           iosMajorVersion: relayMobileDevices.iosMajorVersion,
+          androidApiLevel: relayMobileDevices.androidApiLevel,
           appVersion: relayMobileDevices.appVersion,
+          notificationChannelId: relayMobileDevices.notificationChannelId,
+          alertNotificationChannelId: relayMobileDevices.alertNotificationChannelId,
           preferences: relayMobileDevices.preferencesJson,
           updatedAt: relayMobileDevices.updatedAt,
         })
@@ -230,24 +246,40 @@ export const make = Effect.gen(function* () {
             (cause) => new DeviceListPersistenceError({ userId: input.userId, cause }),
           ),
         );
-      return rows.map((row) => ({
-        deviceId: row.deviceId,
-        label: row.label,
-        platform: row.platform,
-        iosMajorVersion: row.iosMajorVersion,
-        appVersion: row.appVersion,
-        notifications: {
-          enabled: row.preferences.notificationsEnabled,
-          notifyOnApproval: row.preferences.notifyOnApproval,
-          notifyOnInput: row.preferences.notifyOnInput,
-          notifyOnCompletion: row.preferences.notifyOnCompletion,
-          notifyOnFailure: row.preferences.notifyOnFailure,
-        },
-        liveActivities: {
-          enabled: row.preferences.liveActivitiesEnabled,
-        },
-        updatedAt: row.updatedAt,
-      }));
+      return rows.map((row) => {
+        const base = {
+          deviceId: row.deviceId,
+          label: row.label,
+          appVersion: row.appVersion,
+          notifications: {
+            enabled: row.preferences.notificationsEnabled,
+            notifyOnApproval: row.preferences.notifyOnApproval,
+            notifyOnInput: row.preferences.notifyOnInput,
+            notifyOnCompletion: row.preferences.notifyOnCompletion,
+            notifyOnFailure: row.preferences.notifyOnFailure,
+          },
+          liveActivities: {
+            enabled: row.preferences.liveActivitiesEnabled,
+          },
+          updatedAt: row.updatedAt,
+        };
+
+        if (row.platform === "android") {
+          return {
+            ...base,
+            platform: "android" as const,
+            androidApiLevel: row.androidApiLevel,
+            notificationChannelId: row.notificationChannelId,
+            alertNotificationChannelId: row.alertNotificationChannelId,
+          };
+        }
+
+        return {
+          ...base,
+          platform: "ios" as const,
+          iosMajorVersion: row.iosMajorVersion ?? 18,
+        };
+      });
     }),
   });
 });

@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Platform } from "react-native";
 
+import { ensureAndroidAgentActivityNotificationChannels } from "./androidNotifications";
+
 export type NotificationPermissionResult =
   | { readonly type: "unsupported" }
   | { readonly type: "granted" }
@@ -15,7 +17,7 @@ export class NotificationPermissionReadError extends Schema.TaggedErrorClass<Not
   },
 ) {
   override get message(): string {
-    return "Failed to read notification permissions on iOS.";
+    return "Failed to read notification permissions for this device.";
   }
 }
 
@@ -26,15 +28,27 @@ export class NotificationPermissionRequestError extends Schema.TaggedErrorClass<
   },
 ) {
   override get message(): string {
-    return "Failed to request notification permissions on iOS.";
+    return "Failed to request notification permissions for this device.";
   }
 }
+
+function supportsAgentNotifications(): boolean {
+  return Platform.OS === "ios" || Platform.OS === "android";
+}
+
+const ensurePlatformNotificationSetup = Effect.tryPromise({
+  try: () =>
+    Platform.OS === "android"
+      ? ensureAndroidAgentActivityNotificationChannels()
+      : Promise.resolve(null),
+  catch: (cause) => new NotificationPermissionRequestError({ cause }),
+});
 
 export const requestAgentNotificationPermission: Effect.Effect<
   NotificationPermissionResult,
   NotificationPermissionReadError | NotificationPermissionRequestError
 > = Effect.gen(function* () {
-  if (Platform.OS !== "ios") {
+  if (!supportsAgentNotifications()) {
     return { type: "unsupported" };
   }
 
@@ -43,6 +57,7 @@ export const requestAgentNotificationPermission: Effect.Effect<
     catch: (cause) => new NotificationPermissionReadError({ cause }),
   });
   if (existing.granted) {
+    yield* ensurePlatformNotificationSetup;
     return { type: "granted" };
   }
 
@@ -53,6 +68,7 @@ export const requestAgentNotificationPermission: Effect.Effect<
   const requested = yield* Effect.tryPromise({
     try: () =>
       Notifications.requestPermissionsAsync({
+        android: {},
         ios: {
           allowAlert: true,
           allowBadge: true,
@@ -61,7 +77,10 @@ export const requestAgentNotificationPermission: Effect.Effect<
       }),
     catch: (cause) => new NotificationPermissionRequestError({ cause }),
   });
-  return requested.granted
-    ? { type: "granted" }
-    : { type: "denied", canAskAgain: requested.canAskAgain };
+  if (!requested.granted) {
+    return { type: "denied", canAskAgain: requested.canAskAgain };
+  }
+
+  yield* ensurePlatformNotificationSetup;
+  return { type: "granted" };
 });

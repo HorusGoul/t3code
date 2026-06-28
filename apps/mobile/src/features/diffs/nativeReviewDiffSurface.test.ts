@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import reviewDiffModuleConfig from "../../../modules/t3-review-diff/expo-module.config.json" with { type: "json" };
+import reviewDiffPackage from "../../../modules/t3-review-diff/package.json" with { type: "json" };
 
 const expoMocks = vi.hoisted(() => ({
   requireNativeView: vi.fn(),
@@ -76,5 +78,15 @@ describe("resolveNativeReviewDiffView", () => {
       }),
     );
     expect(consoleError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("native review diff module registration", () => {
+  it("registers the Android view manager for Expo autolinking", () => {
+    const androidModule = "expo.modules.t3reviewdiff.T3ReviewDiffModule";
+
+    expect(reviewDiffModuleConfig.platforms).toContain("android");
+    expect(reviewDiffModuleConfig.android.modules).toEqual([androidModule]);
+    expect(reviewDiffPackage["expo-module"].android.modules).toEqual([androidModule]);
   });
 });

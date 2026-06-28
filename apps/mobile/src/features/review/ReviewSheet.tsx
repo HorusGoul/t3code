@@ -35,6 +35,7 @@ import { useReviewSections } from "./useReviewSections";
 import { useNativeReviewDiffBridge } from "./useNativeReviewDiffBridge";
 import { useReviewCommentSelectionController } from "./useReviewCommentSelectionController";
 import { resolveReviewAvailability } from "./reviewAvailability";
+import { REVIEW_MONO_FONT_FAMILY } from "./reviewDiffRendering";
 
 const IOS_NAV_BAR_HEIGHT = 44;
 const REVIEW_HEADER_SPACING = 0;
@@ -147,7 +148,7 @@ export function ReviewSheet() {
       selectedSection,
       draftMessage,
     });
-  const NativeReviewDiffView = resolveNativeReviewDiffView()!;
+  const NativeReviewDiffView = resolveNativeReviewDiffView();
   const reviewFiles = parsedDiff.kind === "files" ? parsedDiff.files : [];
   const fileVisibility = useReviewFileVisibility({
     threadKey: reviewCache.threadKey,
@@ -176,7 +177,7 @@ export function ReviewSheet() {
     collapsedFileIds,
     viewedFileIds,
     selectedRowIds: commentSelection.selectedRowIds,
-    canHighlight: parsedDiff.kind === "files",
+    canHighlight: parsedDiff.kind === "files" && NativeReviewDiffView != null,
   });
 
   const handleNativeToggleFile = useCallback(
@@ -381,7 +382,7 @@ export function ReviewSheet() {
               onRetry={handleRetryEnvironment}
             />
           </View>
-        ) : selectedSection && parsedDiff.kind === "files" ? (
+        ) : selectedSection && parsedDiff.kind === "files" && NativeReviewDiffView ? (
           <View
             className="flex-1"
             style={{
@@ -457,6 +458,25 @@ export function ReviewSheet() {
                   <Text selectable className="font-mono text-xs leading-[19px] text-foreground">
                     {parsedDiff.text}
                   </Text>
+                </ScrollView>
+              </View>
+            ) : parsedDiff.kind === "files" ? (
+              <View className="gap-3 border-b border-border bg-card px-4 py-4">
+                <Text className="text-xs font-t3-bold text-foreground">
+                  Native diff renderer unavailable
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
+                  <NativeText
+                    selectable
+                    style={{
+                      color: headerForeground,
+                      fontFamily: REVIEW_MONO_FONT_FAMILY,
+                      fontSize: 12,
+                      lineHeight: 19,
+                    }}
+                  >
+                    {selectedSection.diff?.trim() || "No diff text available."}
+                  </NativeText>
                 </ScrollView>
               </View>
             ) : null}

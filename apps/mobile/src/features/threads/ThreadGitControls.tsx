@@ -16,6 +16,7 @@ import { useCallback, useMemo } from "react";
 import { Alert } from "react-native";
 import { buildThreadFilesNavigation, buildThreadReviewRoutePath } from "../../lib/routes";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { nativeToolbarIcon } from "../../lib/nativeToolbarIcons";
 import {
   basename,
   getTerminalStatusLabel,
@@ -183,7 +184,11 @@ export function ThreadGitControls(props: {
 
   return (
     <Stack.Toolbar placement="right">
-      <Stack.Toolbar.Menu icon="terminal" disabled={!props.canOpenTerminal} separateBackground>
+      <Stack.Toolbar.Menu
+        icon={nativeToolbarIcon("terminal", "terminal")}
+        disabled={!props.canOpenTerminal}
+        separateBackground
+      >
         {props.projectScripts.length > 0 ? (
           props.projectScripts.map((script) => (
             <Stack.Toolbar.MenuAction
@@ -231,7 +236,9 @@ export function ThreadGitControls(props: {
           <Stack.Toolbar.Label>Open new terminal</Stack.Toolbar.Label>
         </Stack.Toolbar.MenuAction>
       </Stack.Toolbar.Menu>
-      <Stack.Toolbar.Menu icon="point.topleft.down.curvedto.point.bottomright.up">
+      <Stack.Toolbar.Menu
+        icon={nativeToolbarIcon("point.topleft.down.curvedto.point.bottomright.up", "gitBranch")}
+      >
         <Stack.Toolbar.MenuAction
           icon="point.topleft.down.curvedto.point.bottomright.up"
           disabled

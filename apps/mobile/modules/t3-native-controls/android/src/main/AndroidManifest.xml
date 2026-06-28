@@ -1,1 +1,18 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
+  <application>
+    <receiver
+      android:name="expo.modules.t3nativecontrols.T3AgentActivityNotificationActionReceiver"
+      android:exported="false" />
+
+    <service
+      android:name="expo.modules.t3nativecontrols.T3AgentActivityForegroundService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync"
+      android:stopWithTask="true" />
+  </application>
+</manifest>

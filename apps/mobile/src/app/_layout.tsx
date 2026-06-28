@@ -26,6 +26,7 @@ import {
   useClerkSettingsSheetDetent,
 } from "../features/cloud/ClerkSettingsSheetDetent";
 import { useAgentNotificationNavigation } from "../features/agent-awareness/notificationNavigation";
+import { useAndroidLocalAgentActivityUpdates } from "../features/agent-awareness/useAndroidLocalAgentActivityUpdates";
 import {
   AdaptiveWorkspaceLayout,
   useAdaptiveWorkspaceLayout,
@@ -51,6 +52,7 @@ function AppNavigatorContent() {
   const colorScheme = useColorScheme();
   const statusBarBg = useThemeColor("--color-status-bar");
   useAgentNotificationNavigation();
+  useAndroidLocalAgentActivityUpdates();
   useThreadOutboxDrain();
 
   if (state.isLoadingConnections) {

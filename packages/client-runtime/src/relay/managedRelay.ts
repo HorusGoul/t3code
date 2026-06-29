@@ -808,16 +808,24 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
             clerkToken: input.clerkToken,
             target: dpopProofTargets.registerDevice(),
           },
-          (authorization) =>
-            client.mobile
-              .registerDevice({
-                headers: dpopHeaders(authorization),
-                payload: input.payload,
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("register relay mobile device")),
-                timeoutRelayRequest("Relay mobile device registration"),
-              ),
+          (authorization) => {
+            const payload = input.payload;
+            // Narrow the registration union before calling the generated endpoint overload.
+            const request =
+              payload.platform === "android"
+                ? client.mobile.registerDevice({
+                    headers: dpopHeaders(authorization),
+                    payload,
+                  })
+                : client.mobile.registerDevice({
+                    headers: dpopHeaders(authorization),
+                    payload,
+                  });
+            return request.pipe(
+              Effect.mapError(relayRequestError("register relay mobile device")),
+              timeoutRelayRequest("Relay mobile device registration"),
+            );
+          },
         );
       },
       Effect.withSpan("clientRuntime.managedRelay.registerDevice"),

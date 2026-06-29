@@ -21,6 +21,25 @@ function responseWithData(data: Record<string, unknown>, identifier = "notificat
   };
 }
 
+function androidResponseWithRemoteData(
+  data: Record<string, string>,
+  identifier = "android-notification-1",
+) {
+  return {
+    notification: {
+      request: {
+        identifier,
+        content: {},
+        trigger: {
+          remoteMessage: {
+            data,
+          },
+        },
+      },
+    },
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -118,6 +137,17 @@ describe("extractAgentNotificationDeepLink", () => {
     expect(
       extractAgentNotificationDeepLink(
         responseWithData({
+          environmentId: "env 1",
+          threadId: "thread/2",
+        }),
+      ),
+    ).toBe("/threads/env%201/thread%2F2");
+  });
+
+  it("falls back to Android Firebase remote message data", () => {
+    expect(
+      extractAgentNotificationDeepLink(
+        androidResponseWithRemoteData({
           environmentId: "env 1",
           threadId: "thread/2",
         }),

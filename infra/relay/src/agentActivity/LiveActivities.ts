@@ -214,7 +214,9 @@ export const make = Effect.gen(function* () {
             eq(relayLiveActivities.deviceId, relayMobileDevices.deviceId),
           ),
         )
-        .where(eq(relayMobileDevices.userId, input.userId))
+        .where(
+          and(eq(relayMobileDevices.userId, input.userId), eq(relayMobileDevices.platform, "ios")),
+        )
         .pipe(
           Effect.flatMap((rows) =>
             Effect.forEach(
@@ -235,7 +237,20 @@ export const make = Effect.gen(function* () {
               { concurrency: "unbounded" },
             ),
           ),
-          Effect.map((rows): ReadonlyArray<TargetRow> => rows),
+          Effect.map(
+            (rows): ReadonlyArray<TargetRow> =>
+              rows.flatMap((row) =>
+                row.platform === "ios" && row.ios_major_version !== null
+                  ? [
+                      {
+                        ...row,
+                        platform: "ios" as const,
+                        ios_major_version: row.ios_major_version,
+                      },
+                    ]
+                  : [],
+              ),
+          ),
           Effect.mapError(
             (cause) =>
               new LiveActivityTargetListPersistenceError({

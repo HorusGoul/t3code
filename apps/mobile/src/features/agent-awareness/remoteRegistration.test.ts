@@ -8,14 +8,19 @@ import Constants from "expo-constants";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import { FetchHttpClient } from "effect/unstable/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
+import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import { Platform } from "react-native";
 
 import type { EnvironmentId } from "@t3tools/contracts";
 import { verifyDpopProof } from "@t3tools/shared/dpop";
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { cryptoLayer } from "../cloud/dpop";
 import { managedRelayClientLayer } from "../cloud/managedRelayLayer";
+import {
+  ANDROID_AGENT_ACTIVITY_ALERT_NOTIFICATION_CHANNEL_ID,
+  ANDROID_AGENT_ACTIVITY_NOTIFICATION_CHANNEL_ID,
+} from "./androidNotifications";
 import { makeRelayDeviceRegistrationRequest } from "./registrationPayload";
 import {
   AgentAwarenessOperationError,
@@ -62,9 +67,17 @@ vi.mock("../../widgets/AgentActivity", () => ({
 }));
 
 vi.mock("expo-notifications", () => ({
+  AndroidImportance: {
+    DEFAULT: 5,
+    HIGH: 6,
+  },
+  AndroidNotificationVisibility: {
+    PUBLIC: 1,
+  },
   addPushTokenListener: vi.fn(() => ({ remove: vi.fn() })),
   getDevicePushTokenAsync: vi.fn(() => Promise.resolve({ type: "ios", data: "apns-token" })),
   getPermissionsAsync: vi.fn(() => Promise.resolve({ granted: true })),
+  setNotificationChannelAsync: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock("expo-crypto", () => ({
@@ -140,9 +153,30 @@ function savedConnection(): SavedRemoteConnection {
   };
 }
 
-const relayTestLayer = managedRelayClientLayer("https://relay.example.test").pipe(
-  Layer.provide(Layer.mergeAll(FetchHttpClient.layer, cryptoLayer)),
-);
+function requestUrl(request: RequestInfo | URL): string {
+  return request instanceof Request ? request.url : String(request);
+}
+
+async function requestBodyJson(
+  request: RequestInfo | URL,
+  init: RequestInit | undefined,
+): Promise<unknown> {
+  if (request instanceof Request) {
+    return await request.clone().json();
+  }
+  const body = init?.body;
+  if (typeof body === "string") {
+    return JSON.parse(body) as unknown;
+  }
+  return await new Request(String(request), init).json();
+}
+
+function relayTestLayer() {
+  const httpClientLayer = remoteHttpClientLayer((input, init) => globalThis.fetch(input, init));
+  return managedRelayClientLayer("https://relay.example.test").pipe(
+    Layer.provide(Layer.mergeAll(httpClientLayer, cryptoLayer)),
+  );
+}
 
 const runBackgroundOperations = Effect.fn("TestRemoteRegistration.runBackgroundOperations")(
   function* () {
@@ -174,8 +208,20 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     vi.stubGlobal("__DEV__", false);
     secureStore.clear();
     backgroundRuntime.pending.length = 0;
+    Object.assign(Platform, { OS: "ios", Version: "18.0" });
     Constants.expoConfig!.extra = {};
     __resetAgentAwarenessRemoteRegistrationForTest();
+    vi.mocked(Notifications.addPushTokenListener).mockClear();
+    vi.mocked(Notifications.addPushTokenListener).mockReturnValue({ remove: vi.fn() });
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockClear();
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
+      type: "ios",
+      data: "apns-token",
+    });
+    vi.mocked(Notifications.getPermissionsAsync).mockClear();
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: true } as never);
+    vi.mocked(Notifications.setNotificationChannelAsync).mockClear();
+    vi.mocked(Notifications.setNotificationChannelAsync).mockResolvedValue(null);
     widgetMocks.getInstances.mockReset();
     widgetMocks.getInstances.mockReturnValue([]);
   });
@@ -185,6 +231,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       makeRelayDeviceRegistrationRequest({
         deviceId: "device-1",
         label: "Julius's iPhone",
+        platform: "ios",
         iosMajorVersion: 18,
         appVersion: "1.0.0",
         pushToken: "apns-token",
@@ -218,6 +265,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       makeRelayDeviceRegistrationRequest({
         deviceId: "device-1",
         label: "Julius's iPhone",
+        platform: "ios",
         iosMajorVersion: 18,
         appVersion: "1.0.0",
         pushToStartToken: "push-to-start-token",
@@ -236,6 +284,42 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       preferences: {
         liveActivitiesEnabled: true,
         notificationsEnabled: false,
+        notifyOnApproval: true,
+        notifyOnInput: true,
+        notifyOnCompletion: true,
+        notifyOnFailure: true,
+      },
+    });
+  });
+
+  it("constructs Android agent activity notification registrations", () => {
+    expect(
+      makeRelayDeviceRegistrationRequest({
+        deviceId: "device-1",
+        label: "Julius's Pixel",
+        platform: "android",
+        androidApiLevel: 35,
+        appVersion: "1.0.0",
+        pushToken: "fcm-token",
+        notificationChannelId: ANDROID_AGENT_ACTIVITY_NOTIFICATION_CHANNEL_ID,
+        alertNotificationChannelId: ANDROID_AGENT_ACTIVITY_ALERT_NOTIFICATION_CHANNEL_ID,
+        notificationsEnabled: true,
+        preferences: {
+          liveActivitiesEnabled: true,
+        },
+      }),
+    ).toEqual({
+      deviceId: "device-1",
+      label: "Julius's Pixel",
+      platform: "android",
+      androidApiLevel: 35,
+      appVersion: "1.0.0",
+      pushToken: "fcm-token",
+      notificationChannelId: ANDROID_AGENT_ACTIVITY_NOTIFICATION_CHANNEL_ID,
+      alertNotificationChannelId: ANDROID_AGENT_ACTIVITY_ALERT_NOTIFICATION_CHANNEL_ID,
+      preferences: {
+        liveActivitiesEnabled: true,
+        notificationsEnabled: true,
         notifyOnApproval: true,
         notifyOnInput: true,
         notifyOnCompletion: true,
@@ -265,7 +349,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
 
       expect(activity.getPushToken).toHaveBeenCalledTimes(2);
       expect(addPushTokenListener).toHaveBeenCalledTimes(1);
-    }).pipe(Effect.provide(relayTestLayer));
+    }).pipe(Effect.provide(relayTestLayer()));
   });
 
   it.effect("preserves Live Activity push-token lookup failures", () => {
@@ -287,7 +371,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         cause,
         message: "Agent awareness operation read-live-activity-push-token failed.",
       });
-    }).pipe(Effect.provide(relayTestLayer));
+    }).pipe(Effect.provide(relayTestLayer()));
   });
 
   it.effect(
@@ -301,7 +385,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
 
       return Effect.gen(function* () {
         expect(yield* registerLiveActivityPushToken({ activity: activity as never })).toBe(false);
-      }).pipe(Effect.provide(relayTestLayer));
+      }).pipe(Effect.provide(relayTestLayer()));
     },
   );
 
@@ -325,7 +409,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         expect(activity.start).not.toHaveBeenCalled();
         expect(activity.update).not.toHaveBeenCalled();
         expect(activity.end).not.toHaveBeenCalled();
-      }).pipe(Effect.provide(relayTestLayer));
+      }).pipe(Effect.provide(relayTestLayer()));
     },
   );
 
@@ -338,11 +422,11 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       yield* refreshAgentAwarenessRegistration();
 
       expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1);
-    }).pipe(Effect.provide(relayTestLayer));
+    }).pipe(Effect.provide(relayTestLayer()));
   });
 
   it.effect("registers the APNs device when cloud auth becomes available", () => {
-    const fetchMock = vi.fn((request: RequestInfo | URL) => {
+    const fetchMock = vi.fn((request: RequestInfo | URL, _init?: RequestInit) => {
       const url = request instanceof Request ? request.url : String(request);
       return Promise.resolve(
         Response.json(
@@ -395,7 +479,86 @@ describe("makeRelayDeviceRegistrationRequest", () => {
           nowEpochSeconds: proofIat(dpop),
         }),
       ).toMatchObject({ ok: true });
-    }).pipe(Effect.provide(relayTestLayer));
+    }).pipe(Effect.provide(relayTestLayer()));
+  });
+
+  it.effect("registers the Android FCM device when cloud auth becomes available", () => {
+    Object.assign(Platform, { OS: "android", Version: 35 });
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
+      type: "android",
+      data: "fcm-token",
+    } as never);
+    const fetchMock = vi.fn((request: RequestInfo | URL, _init?: RequestInit) => {
+      const url = requestUrl(request);
+      return Promise.resolve(
+        Response.json(
+          url.endsWith("/v1/client/dpop-token")
+            ? {
+                access_token: "relay-dpop-token",
+                issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+                token_type: "DPoP",
+                expires_in: 300,
+                scope: "mobile:registration",
+              }
+            : { ok: true },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    Constants.expoConfig!.extra = {
+      relay: {
+        url: "https://relay.example.test/",
+      },
+    };
+
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+
+    return Effect.gen(function* () {
+      yield* refreshAgentAwarenessRegistration();
+
+      expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+        ANDROID_AGENT_ACTIVITY_NOTIFICATION_CHANNEL_ID,
+        expect.objectContaining({
+          name: "Agent Activity",
+          importance: Notifications.AndroidImportance.DEFAULT,
+          showBadge: false,
+        }),
+      );
+      expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+        ANDROID_AGENT_ACTIVITY_ALERT_NOTIFICATION_CHANNEL_ID,
+        expect.objectContaining({
+          name: "Agent Activity Alerts",
+          importance: Notifications.AndroidImportance.HIGH,
+          showBadge: true,
+        }),
+      );
+
+      const deviceCall = fetchMock.mock.calls.find(([request]) =>
+        requestUrl(request as RequestInfo | URL).endsWith("/v1/mobile/devices"),
+      );
+      expect(deviceCall).toBeDefined();
+      if (!deviceCall) {
+        throw new Error("Missing relay device registration request.");
+      }
+      const body = yield* Effect.promise(() =>
+        requestBodyJson(deviceCall[0] as RequestInfo | URL, deviceCall[1] as RequestInit),
+      );
+      expect(body).toMatchObject({
+        deviceId: "device-1",
+        label: "Android device",
+        platform: "android",
+        androidApiLevel: 35,
+        appVersion: "1.0.0",
+        pushToken: "fcm-token",
+        notificationChannelId: ANDROID_AGENT_ACTIVITY_NOTIFICATION_CHANNEL_ID,
+        alertNotificationChannelId: ANDROID_AGENT_ACTIVITY_ALERT_NOTIFICATION_CHANNEL_ID,
+        preferences: {
+          notificationsEnabled: true,
+          liveActivitiesEnabled: true,
+        },
+      });
+      expect(widgetMocks.getInstances).not.toHaveBeenCalled();
+    }).pipe(Effect.provide(relayTestLayer()));
   });
 
   it.effect("coalesces simultaneous sign-in and environment connection registrations", () => {
@@ -429,7 +592,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
       expect(Notifications.getPermissionsAsync).toHaveBeenCalledTimes(1);
-    }).pipe(Effect.provide(relayTestLayer));
+    }).pipe(Effect.provide(relayTestLayer()));
   });
 
   it.effect("continues queued device registration after a failed auth lookup", () => {
@@ -453,7 +616,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
 
       expect(backgroundRuntime.pending).toHaveLength(0);
       expect(tokenProvider).toHaveBeenCalledTimes(2);
-    }).pipe(Effect.provide(relayTestLayer));
+    }).pipe(Effect.provide(relayTestLayer()));
   });
 
   it("only registers again when the authenticated identity changes", () => {
@@ -497,7 +660,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
       expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1);
-    }).pipe(Effect.provide(relayTestLayer));
+    }).pipe(Effect.provide(relayTestLayer()));
   });
 
   it.effect(
@@ -535,7 +698,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         unregisterAgentAwarenessConnection(savedConnection().environmentId);
 
         expect(fetchMock).not.toHaveBeenCalled();
-      }).pipe(Effect.provide(relayTestLayer));
+      }).pipe(Effect.provide(relayTestLayer()));
     },
   );
 });

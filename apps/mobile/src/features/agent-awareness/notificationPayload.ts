@@ -1,11 +1,6 @@
-function dataFromNotificationResponse(response: unknown): Record<string, unknown> | null {
-  if (typeof response !== "object" || response === null) {
-    return null;
-  }
-  const notification = (response as { readonly notification?: unknown }).notification;
-  if (typeof notification !== "object" || notification === null) {
-    return null;
-  }
+export function extractAgentNotificationDataFromNotification(
+  notification: unknown,
+): Record<string, unknown> | null {
   const request = (notification as { readonly request?: unknown }).request;
   if (typeof request !== "object" || request === null) {
     return null;
@@ -15,7 +10,33 @@ function dataFromNotificationResponse(response: unknown): Record<string, unknown
     return null;
   }
   const data = (content as { readonly data?: unknown }).data;
-  return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : null;
+  if (typeof data === "object" && data !== null) {
+    return data as Record<string, unknown>;
+  }
+
+  const trigger = (request as { readonly trigger?: unknown }).trigger;
+  if (typeof trigger !== "object" || trigger === null) {
+    return null;
+  }
+  const remoteMessage = (trigger as { readonly remoteMessage?: unknown }).remoteMessage;
+  if (typeof remoteMessage !== "object" || remoteMessage === null) {
+    return null;
+  }
+  const remoteData = (remoteMessage as { readonly data?: unknown }).data;
+  return typeof remoteData === "object" && remoteData !== null
+    ? (remoteData as Record<string, unknown>)
+    : null;
+}
+
+function dataFromNotificationResponse(response: unknown): Record<string, unknown> | null {
+  if (typeof response !== "object" || response === null) {
+    return null;
+  }
+  const notification = (response as { readonly notification?: unknown }).notification;
+  if (typeof notification !== "object" || notification === null) {
+    return null;
+  }
+  return extractAgentNotificationDataFromNotification(notification);
 }
 
 function identifierFromNotificationResponse(response: unknown): string | null {

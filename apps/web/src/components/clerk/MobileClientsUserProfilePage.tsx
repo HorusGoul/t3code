@@ -8,6 +8,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Skeleton } from "../ui/skeleton";
 import {
+  mobileClientActivityUpdatesLabel,
   mobileClientNotificationDetail,
   mobileClientPlatformLabel,
   mobileClientUpdatedAtLabel,
@@ -53,7 +54,7 @@ function MobileClientRow({ device }: { readonly device: RelayClientDeviceRecord 
             />
             <MobileClientStatusBadge
               enabled={device.liveActivities.enabled}
-              label="Live Activities"
+              label={mobileClientActivityUpdatesLabel(device)}
             />
           </div>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground/80">
@@ -96,8 +97,8 @@ function EmptyMobileClients() {
       <EmptyHeader>
         <EmptyTitle>No mobile clients</EmptyTitle>
         <EmptyDescription>
-          Sign in to T3 Code on your iPhone to register it for push notifications and Live
-          Activities.
+          Sign in to T3 Code on your phone to register it for push notifications and agent activity
+          updates.
         </EmptyDescription>
       </EmptyHeader>
     </Empty>

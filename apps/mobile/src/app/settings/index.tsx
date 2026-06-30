@@ -27,6 +27,7 @@ import {
 } from "../../features/cloud/publicConfig";
 import { useAdaptiveWorkspaceLayout } from "../../features/layout/AdaptiveWorkspaceLayout";
 import { WorkspaceSidebarToolbar } from "../../features/layout/workspace-sidebar-toolbar";
+import type { SavedRemoteConnection } from "../../lib/connection";
 import { runtime } from "../../lib/runtime";
 import { loadPreferences } from "../../lib/storage";
 import { useThemeColor } from "../../lib/useThemeColor";
@@ -60,7 +61,8 @@ export default function SettingsRouteScreen() {
 function LocalSettingsRouteScreen() {
   const insets = useSafeAreaInsets();
   const { savedConnectionsById } = useSavedRemoteConnections();
-  const environmentCount = Object.keys(savedConnectionsById).length;
+  const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
+  const environmentCount = connections.length;
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -83,6 +85,9 @@ function LocalSettingsRouteScreen() {
             value={`${environmentCount}`}
             href="/settings/environments"
           />
+          {Platform.OS === "android" ? (
+            <AndroidLocalAgentActivitySettingsRows connections={connections} />
+          ) : null}
         </SettingsSection>
 
         <ArchivedThreadsSettingsSection />
@@ -112,7 +117,7 @@ function ConfiguredSettingsRouteScreen() {
   }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
 
   const refreshNotifications = useCallback(async () => {
-    if (process.env.EXPO_OS !== "ios") {
+    if (Platform.OS !== "ios") {
       setNotificationStatus("unsupported");
       return;
     }
@@ -378,22 +383,28 @@ function ConfiguredSettingsRouteScreen() {
             value={`${environmentCount}`}
             href="/settings/environments"
           />
-          <SettingsSwitchRow
-            icon="bell.badge"
-            label="Device Notifications"
-            disabled={notificationStatus === "checking" || notificationStatus === "unsupported"}
-            value={notificationStatus === "enabled"}
-            onValueChange={handleDeviceNotificationsChange}
-          />
-          <SettingsSwitchRow
-            disabled={
-              !isLoaded || liveActivityStatus === "checking" || liveActivityStatus === "linking"
-            }
-            icon="bolt.circle"
-            label="Live Activity Updates"
-            value={liveActivityStatus === "enabled" || liveActivityStatus === "linking"}
-            onValueChange={handleLiveActivitiesChange}
-          />
+          {Platform.OS === "android" ? (
+            <AndroidLocalAgentActivitySettingsRows connections={connections} />
+          ) : (
+            <>
+              <SettingsSwitchRow
+                icon="bell.badge"
+                label="Device Notifications"
+                disabled={notificationStatus === "checking" || notificationStatus === "unsupported"}
+                value={notificationStatus === "enabled"}
+                onValueChange={handleDeviceNotificationsChange}
+              />
+              <SettingsSwitchRow
+                disabled={
+                  !isLoaded || liveActivityStatus === "checking" || liveActivityStatus === "linking"
+                }
+                icon="bolt.circle"
+                label="Live Activity Updates"
+                value={liveActivityStatus === "enabled" || liveActivityStatus === "linking"}
+                onValueChange={handleLiveActivitiesChange}
+              />
+            </>
+          )}
         </SettingsSection>
 
         <ArchivedThreadsSettingsSection />
@@ -401,6 +412,196 @@ function ConfiguredSettingsRouteScreen() {
         <AppSettingsSection />
       </ScrollView>
     </View>
+  );
+}
+
+function AndroidLocalAgentActivitySettingsRows(props: {
+  readonly connections: ReadonlyArray<SavedRemoteConnection>;
+}) {
+  const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
+  const [activityStatus, setActivityStatus] = useState<LiveActivityStatus>("checking");
+  const activitySwitchIsEnabled =
+    activityStatus === "linking" ||
+    (activityStatus === "enabled" && notificationStatus === "enabled");
+
+  const refreshNotifications = useCallback(async () => {
+    const result = await settlePromise(() => Notifications.getPermissionsAsync());
+    if (result._tag === "Failure") {
+      reportAtomCommandResult(result, { label: "android notification permission refresh" });
+      setNotificationStatus("disabled");
+      return;
+    }
+    setNotificationStatus(result.value.granted ? "enabled" : "disabled");
+  }, []);
+
+  useEffect(() => {
+    void refreshNotifications();
+  }, [refreshNotifications]);
+
+  useEffect(() => {
+    void (async () => {
+      const result = await settlePromise(() => loadPreferences());
+      if (result._tag === "Failure") {
+        reportAtomCommandResult(result, { label: "android agent activity preference load" });
+        setActivityStatus("disabled");
+        return;
+      }
+      setActivityStatus(result.value.liveActivitiesEnabled === false ? "disabled" : "enabled");
+    })();
+  }, []);
+
+  const requestNotifications = useCallback(
+    async (options?: { readonly showGrantedAlert?: boolean }): Promise<boolean> => {
+      const result = await settleAsyncResult(() =>
+        runtime.runPromiseExit(requestAgentNotificationPermission),
+      );
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          Alert.alert(
+            "Notifications unavailable",
+            error instanceof Error ? error.message : "Could not request notification permission.",
+          );
+        }
+        return false;
+      }
+      if (result.value.type === "granted") {
+        setNotificationStatus("enabled");
+        if (options?.showGrantedAlert !== false) {
+          Alert.alert(
+            "Notifications enabled",
+            "Agent Activity notifications are enabled for this device.",
+          );
+        }
+        return true;
+      }
+      if (result.value.type === "unsupported") {
+        setNotificationStatus("unsupported");
+        Alert.alert(
+          "Notifications unavailable",
+          "Agent Activity notifications are not available on this platform.",
+        );
+        return false;
+      }
+      setNotificationStatus("disabled");
+      if (result.value.canAskAgain) {
+        Alert.alert("Notifications disabled", "Notifications were not enabled.");
+        return false;
+      }
+      Alert.alert(
+        "Notifications disabled",
+        "Notifications were denied for this app. Open Settings to enable them.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        ],
+      );
+      return false;
+    },
+    [],
+  );
+
+  const handleDeviceNotificationsChange = useCallback(
+    (enabled: boolean) => {
+      if (enabled) {
+        void requestNotifications();
+        return;
+      }
+
+      Alert.alert(
+        "Disable notifications",
+        "Notification permission is controlled by Android. Open Settings to disable notifications for T3 Code.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        ],
+      );
+    },
+    [requestNotifications],
+  );
+
+  const saveLocalAgentActivityPreference = useCallback(
+    async (enabled: boolean) => {
+      const updateResult = await settleAsyncResult(() =>
+        runtime.runPromiseExit(
+          setLiveActivityUpdatesEnabled({
+            enabled,
+            clerkToken: null,
+            connections: props.connections,
+          }),
+        ),
+      );
+      if (updateResult._tag === "Failure") {
+        setActivityStatus(enabled ? "disabled" : "enabled");
+        if (!isAtomCommandInterrupted(updateResult)) {
+          const error = squashAtomCommandFailure(updateResult);
+          Alert.alert(
+            "Agent Activity unavailable",
+            error instanceof Error ? error.message : "Could not update Agent Activity settings.",
+          );
+        }
+        return false;
+      }
+      return true;
+    },
+    [props.connections],
+  );
+
+  const handleAgentActivityChange = useCallback(
+    (enabled: boolean) => {
+      if (!enabled) {
+        setActivityStatus("disabled");
+        void saveLocalAgentActivityPreference(false);
+        return;
+      }
+
+      void (async () => {
+        setActivityStatus("linking");
+        const notificationsEnabled =
+          notificationStatus === "enabled" ||
+          (await requestNotifications({ showGrantedAlert: false }));
+        if (!notificationsEnabled) {
+          setActivityStatus("disabled");
+          return;
+        }
+
+        const saved = await saveLocalAgentActivityPreference(true);
+        setActivityStatus(saved ? "enabled" : "disabled");
+        if (saved) {
+          Alert.alert(
+            "Agent Activity enabled",
+            props.connections.length > 0
+              ? `${props.connections.length} environment${props.connections.length === 1 ? "" : "s"} connected for local Agent Activity updates.`
+              : "Agent Activity updates are enabled. Add an environment to start receiving updates.",
+          );
+        }
+      })();
+    },
+    [
+      notificationStatus,
+      props.connections.length,
+      requestNotifications,
+      saveLocalAgentActivityPreference,
+    ],
+  );
+
+  return (
+    <>
+      <SettingsSwitchRow
+        icon="bell.badge"
+        label="Device Notifications"
+        disabled={notificationStatus === "checking" || notificationStatus === "unsupported"}
+        value={notificationStatus === "enabled"}
+        onValueChange={handleDeviceNotificationsChange}
+      />
+      <SettingsSwitchRow
+        disabled={activityStatus === "checking" || activityStatus === "linking"}
+        icon="bolt.circle"
+        label="Agent Activity Updates"
+        value={activitySwitchIsEnabled}
+        onValueChange={handleAgentActivityChange}
+      />
+    </>
   );
 }
 

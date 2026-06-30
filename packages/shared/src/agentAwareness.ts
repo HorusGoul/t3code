@@ -23,6 +23,8 @@ export interface AgentAwarenessState {
   readonly headline: string;
   readonly detail?: string;
   readonly modelTitle: string;
+  readonly workStartedAt?: string;
+  readonly workEndedAt?: string;
   readonly updatedAt: string;
   readonly deepLink: string;
 }
@@ -77,6 +79,7 @@ export function projectThreadAwareness(
     headline: headlineForPhase(phase),
     ...(detail === undefined ? {} : { detail }),
     modelTitle: thread.modelSelection.model,
+    ...workTimingForPhase(phase, thread),
     updatedAt: thread.updatedAt,
     deepLink: buildAgentAwarenessDeepLink({ environmentId, threadId: thread.id }),
   };
@@ -139,4 +142,30 @@ function detailForPhase(
     return `${thread.session.providerName} is active.`;
   }
   return undefined;
+}
+
+function workTimingForPhase(
+  phase: AgentAwarenessPhase,
+  thread: ProjectThreadAwarenessInput["thread"],
+): Pick<AgentAwarenessState, "workStartedAt" | "workEndedAt"> {
+  const startedAt = thread.latestTurn?.startedAt ?? thread.session?.updatedAt ?? undefined;
+  if (!startedAt) {
+    return {};
+  }
+
+  if (phase === "completed") {
+    return {
+      workStartedAt: startedAt,
+      workEndedAt: thread.latestTurn?.completedAt ?? thread.updatedAt,
+    };
+  }
+
+  if (phase === "failed") {
+    return {
+      workStartedAt: startedAt,
+      workEndedAt: thread.latestTurn?.completedAt ?? thread.updatedAt,
+    };
+  }
+
+  return { workStartedAt: startedAt };
 }

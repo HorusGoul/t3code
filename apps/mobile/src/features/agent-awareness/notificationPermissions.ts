@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Platform } from "react-native";
 
+import { ensureAndroidAgentActivityNotificationChannel } from "./androidNotifications";
+
 export type NotificationPermissionResult =
   | { readonly type: "unsupported" }
   | { readonly type: "granted" }
@@ -15,7 +17,7 @@ export class NotificationPermissionReadError extends Schema.TaggedErrorClass<Not
   },
 ) {
   override get message(): string {
-    return "Failed to read notification permissions on iOS.";
+    return "Failed to read notification permissions.";
   }
 }
 
@@ -26,7 +28,7 @@ export class NotificationPermissionRequestError extends Schema.TaggedErrorClass<
   },
 ) {
   override get message(): string {
-    return "Failed to request notification permissions on iOS.";
+    return "Failed to request notification permissions.";
   }
 }
 
@@ -34,8 +36,15 @@ export const requestAgentNotificationPermission: Effect.Effect<
   NotificationPermissionResult,
   NotificationPermissionReadError | NotificationPermissionRequestError
 > = Effect.gen(function* () {
-  if (Platform.OS !== "ios") {
+  if (Platform.OS !== "ios" && Platform.OS !== "android") {
     return { type: "unsupported" };
+  }
+
+  if (Platform.OS === "android") {
+    yield* Effect.tryPromise({
+      try: () => ensureAndroidAgentActivityNotificationChannel(),
+      catch: (cause) => new NotificationPermissionRequestError({ cause }),
+    });
   }
 
   const existing = yield* Effect.tryPromise({
@@ -53,6 +62,7 @@ export const requestAgentNotificationPermission: Effect.Effect<
   const requested = yield* Effect.tryPromise({
     try: () =>
       Notifications.requestPermissionsAsync({
+        android: {},
         ios: {
           allowAlert: true,
           allowBadge: true,

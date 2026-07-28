@@ -1,0 +1,151 @@
+name: Mobile Android APK Preview
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  build:
+    name: Build Android APK preview
+    if: github.event.label.name == 'android:apk-preview'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    concurrency:
+      group: android-apk-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      ANDROID_APK_PATH: dist/mobile/android/t3code-preview-release.apk
+      APP_VARIANT: preview
+      NODE_OPTIONS: --max-old-space-size=8192
+      T3CODE_ANDROID_PREVIEW_RELEASE_APK_PATH: dist/mobile/android/t3code-preview-release.apk
+      T3CODE_ANDROID_PREVIEW_RELEASE_ARCHITECTURES: arm64-v8a
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Android preview release APK
+        run: vp run dist:mobile:android:preview:release
+
+      - id: apk
+        name: Verify APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f "$ANDROID_APK_PATH"
+          unzip -l "$ANDROID_APK_PATH" | grep -E 'assets/(index\.android\.bundle|app\.manifest)'
+
+          size_bytes="$(stat -c '%s' "$ANDROID_APK_PATH")"
+          size_mib="$(awk "BEGIN { printf \"%.1f\", $size_bytes / 1024 / 1024 }")"
+          sha256="$(sha256sum "$ANDROID_APK_PATH" | awk '{ print $1 }')"
+
+          echo "size_mib=$size_mib" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - id: upload-apk
+        name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: t3code-preview-release-pr-${{ github.event.pull_request.number }}
+          path: ${{ env.ANDROID_APK_PATH }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Comment APK artifact and remove trigger label
+        uses: actions/github-script@v8
+        env:
+          APK_ARTIFACT_NAME: t3code-preview-release-pr-${{ github.event.pull_request.number }}
+          APK_ARTIFACT_URL: ${{ steps.upload-apk.outputs.artifact-url }}
+          APK_SHA256: ${{ steps.apk.outputs.sha256 }}
+          APK_SIZE_MIB: ${{ steps.apk.outputs.size_mib }}
+          APK_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          LABEL_NAME: android:apk-preview
+        with:
+          script: |
+            const marker = "<!-- t3code-android-apk-preview -->";
+            const issueNumber = context.payload.pull_request.number;
+            const serverUrl = process.env.GITHUB_SERVER_URL ?? "https://github.com";
+            const artifactUrl = process.env.APK_ARTIFACT_URL || `${serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const shortSha = (process.env.APK_SOURCE_SHA ?? "").slice(0, 12);
+            const body = [
+              marker,
+              "## Android APK preview",
+              "",
+              "A self-contained Android preview APK was built for this PR.",
+              "",
+              `- Artifact: [${process.env.APK_ARTIFACT_NAME}](${artifactUrl})`,
+              `- Size: ${process.env.APK_SIZE_MIB} MiB`,
+              `- SHA-256: \`${process.env.APK_SHA256}\``,
+              `- Source: \`${shortSha}\``,
+              "- Note: GitHub Actions downloads artifacts as zip archives.",
+              "",
+              "Re-add the `android:apk-preview` label to build a fresh APK.",
+            ].join("\n");
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body,
+              });
+            }
+
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: process.env.LABEL_NAME,
+              });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
